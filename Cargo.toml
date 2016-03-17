@@ -1,0 +1,6 @@
+[package]
+name = "openzwave-stateful"
+version = "0.1.0"
+authors = ["Julien Wajsberg <felash@gmail.com>"]
+
+[dependencies]
