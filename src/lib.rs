@@ -2,11 +2,10 @@ extern crate openzwave;
 use openzwave::{options, manager, controller};
 use openzwave::notification::*;
 use openzwave::node::*;
-use openzwave::value_classes::value_id::{ ValueGenre, ValueID };
-use std::{fs, io};
+use openzwave::value_classes::value_id::ValueID;
+use std::fs;
 use std::sync::{ Arc, Mutex };
 use std::collections::{ BTreeSet, HashMap, HashSet };
-use std::io::Write;
 use std::ops::DerefMut;
 use std::sync::MutexGuard;
 
@@ -161,9 +160,9 @@ pub fn init(device: Option<&str>) -> Result<ZWaveManager,()> {
     try!(options::Options::add_option_string(&mut options, "NetworkKey", "0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10", false));
 
     let mut manager = try!(manager::Manager::create(options));
-    let zWaveManager = ZWaveManager::new();
+    let zwave_manager = ZWaveManager::new();
 
-    try!(manager.add_watcher(zWaveManager.clone()));
+    try!(manager.add_watcher(zwave_manager.clone()));
 
     let device = device.unwrap_or_else(|| get_default_device().expect("No device found."));
 
@@ -174,7 +173,7 @@ pub fn init(device: Option<&str>) -> Result<ZWaveManager,()> {
         _ => manager.add_driver(&device)
     });
 
-    Ok(zWaveManager)
+    Ok(zwave_manager)
 }
 
 #[cfg(test)]
