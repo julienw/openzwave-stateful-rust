@@ -3,6 +3,7 @@ use openzwave::{options, manager, controller};
 use openzwave::notification::*;
 use openzwave::node::*;
 use openzwave::value_classes::value_id::ValueID;
+pub use openzwave::value_classes::value_id::ValueGenre;
 use std::fs;
 use std::sync::{ Arc, Mutex };
 use std::collections::{ BTreeSet, HashMap, HashSet };
