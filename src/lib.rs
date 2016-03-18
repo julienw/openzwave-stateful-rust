@@ -47,6 +47,22 @@ impl State {
         }
     }
 
+    pub fn get_controllers(&self) -> &HashSet<controller::Controller> {
+        &self.controllers
+    }
+
+    pub fn get_nodes(&self) -> &BTreeSet<Node> {
+        &self.nodes
+    }
+
+    pub fn get_nodes_map(&self) -> &HashMap<controller::Controller, BTreeSet<Node>> {
+        &self.nodes_map
+    }
+
+    pub fn get_values(&self) -> &BTreeSet<ValueID> {
+        &self.value_ids
+    }
+
     pub fn add_node(&mut self, node: Node) {
         let node_set = self.nodes_map.entry(node.get_controller()).or_insert(BTreeSet::new());
         node_set.insert(node);
@@ -70,24 +86,49 @@ impl State {
     }
 }
 
-#[derive(Debug, Clone)]
 pub struct ZWaveManager {
-    state: Arc<Mutex<State>>
+    watcher: ZWaveWatcher,
+    ozw_manager: manager::Manager
 }
 
 impl ZWaveManager {
-    fn new() -> ZWaveManager {
+    fn new(manager: manager::Manager) -> ZWaveManager {
         ZWaveManager {
-            state: Arc::new(Mutex::new(State::new()))
+            watcher: ZWaveWatcher {
+                state: Arc::new(Mutex::new(State::new())),
+            },
+            ozw_manager: manager
         }
     }
 
+    fn add_watcher(&mut self) -> Result<(), ()> {
+        self.ozw_manager.add_watcher(self.watcher.clone()).and(Ok(()))
+    }
+
+    fn add_driver(&mut self, device: &str) -> Result<(), ()> {
+        match device {
+            "usb" => self.ozw_manager.add_usb_driver(),
+            _ => self.ozw_manager.add_driver(&device)
+        }
+    }
+
+    pub fn get_state(&self) -> MutexGuard<State> {
+        self.watcher.get_state()
+    }
+}
+
+#[derive(Clone)]
+struct ZWaveWatcher {
+    state: Arc<Mutex<State>>
+}
+
+impl ZWaveWatcher {
     pub fn get_state(&self) -> MutexGuard<State> {
         self.state.lock().unwrap()
     }
 }
 
-impl manager::NotificationWatcher for ZWaveManager {
+impl manager::NotificationWatcher for ZWaveWatcher {
     fn on_notification(&self, notification: Notification) {
         //println!("Received notification: {:?}", notification);
 
@@ -154,21 +195,17 @@ pub fn init(options: &InitOptions) -> Result<ZWaveManager,()> {
     try!(options::Options::add_option_string(&mut ozw_options, "NetworkKey", "0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10", false));
 
     let mut manager = try!(manager::Manager::create(ozw_options));
-    let zwave_manager = ZWaveManager::new();
-
-    try!(manager.add_watcher(zwave_manager.clone()));
+    let mut zwave_manager = ZWaveManager::new(manager);
+    try!(zwave_manager.add_watcher());
 
     let device = match options.device {
         Some(ref device) => device,
         _ => try!(get_default_device().ok_or(()))
     };
 
-    println!("found device {}", device);
+    //println!("found device {}", device);
 
-    try!(match device.as_ref() {
-        "usb" => manager.add_usb_driver(),
-        _ => manager.add_driver(&device)
-    });
+    try!(zwave_manager.add_driver(&device));
 
     Ok(zwave_manager)
 }
