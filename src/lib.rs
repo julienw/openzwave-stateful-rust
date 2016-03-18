@@ -142,7 +142,7 @@ impl manager::NotificationWatcher for ZWaveManager {
 }
 
 pub struct InitOptions {
-    device: Option<String>
+    pub device: Option<String>
 }
 
 pub fn init(options: &InitOptions) -> Result<ZWaveManager,()> {
