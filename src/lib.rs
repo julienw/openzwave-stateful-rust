@@ -151,24 +151,31 @@ impl manager::NotificationWatcher for ZWaveManager {
     }
 }
 
-pub fn init(device: Option<&str>) -> Result<ZWaveManager,()> {
-    let mut options = try!(options::Options::create("./config/", "", "--SaveConfiguration true --DumpTriggerLevel 0 --ConsoleOutput false"));
+pub struct Options {
+    device: Option<String>
+}
+
+pub fn init(options: &Options) -> Result<ZWaveManager,()> {
+    let mut ozw_options = try!(options::Options::create("./config/", "", "--SaveConfiguration true --DumpTriggerLevel 0 --ConsoleOutput false"));
 
     // TODO: The NetworkKey should really be derived from something unique
     //       about the foxbox that we're running on. This particular set of
     //       values happens to be the default that domoticz uses.
-    try!(options::Options::add_option_string(&mut options, "NetworkKey", "0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10", false));
+    try!(options::Options::add_option_string(&mut ozw_options, "NetworkKey", "0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10", false));
 
-    let mut manager = try!(manager::Manager::create(options));
+    let mut manager = try!(manager::Manager::create(ozw_options));
     let zwave_manager = ZWaveManager::new();
 
     try!(manager.add_watcher(zwave_manager.clone()));
 
-    let device = device.unwrap_or_else(|| get_default_device().expect("No device found."));
+    let device = match options.device {
+        Some(ref device) => device,
+        _ => try!(get_default_device().ok_or(()))
+    };
 
     println!("found device {}", device);
 
-    try!(match device {
+    try!(match device.as_ref() {
         "usb" => manager.add_usb_driver(),
         _ => manager.add_driver(&device)
     });
