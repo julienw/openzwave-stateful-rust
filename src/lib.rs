@@ -193,7 +193,7 @@ pub fn init(options: &InitOptions) -> Result<ZWaveManager,()> {
     //       values happens to be the default that domoticz uses.
     try!(options::Options::add_option_string(&mut ozw_options, "NetworkKey", "0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10", false));
 
-    let mut manager = try!(manager::Manager::create(ozw_options));
+    let manager = try!(manager::Manager::create(ozw_options));
     let mut zwave_manager = ZWaveManager::new(manager);
     try!(zwave_manager.add_watcher());
 
