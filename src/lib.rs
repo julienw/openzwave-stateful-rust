@@ -6,7 +6,6 @@ use openzwave::value_classes::value_id::ValueID;
 use std::fs;
 use std::sync::{ Arc, Mutex };
 use std::collections::{ BTreeSet, HashMap, HashSet };
-use std::ops::DerefMut;
 use std::sync::MutexGuard;
 
 #[cfg(windows)]
@@ -85,16 +84,6 @@ impl ZWaveManager {
     pub fn get_state(&self) -> MutexGuard<State> {
         self.state.lock().unwrap()
     }
-
-    /*
-    pub fn with_state<F, T>(&mut self, f: F)
-        where F: FnMut(&mut T) -> (),
-              T: DerefMut<Target=State>
-    {
-        let mut state = self.state.lock().unwrap();
-        f(&mut state);
-    }
-    */
 }
 
 impl manager::NotificationWatcher for ZWaveManager {
