@@ -151,11 +151,11 @@ impl manager::NotificationWatcher for ZWaveManager {
     }
 }
 
-pub struct Options {
+pub struct InitOptions {
     device: Option<String>
 }
 
-pub fn init(options: &Options) -> Result<ZWaveManager,()> {
+pub fn init(options: &InitOptions) -> Result<ZWaveManager,()> {
     let mut ozw_options = try!(options::Options::create("./config/", "", "--SaveConfiguration true --DumpTriggerLevel 0 --ConsoleOutput false"));
 
     // TODO: The NetworkKey should really be derived from something unique
