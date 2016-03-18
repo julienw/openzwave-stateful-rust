@@ -198,7 +198,7 @@ pub fn init(options: &InitOptions) -> Result<ZWaveManager,()> {
     try!(zwave_manager.add_watcher());
 
     let device = match options.device {
-        Some(ref device) => device,
+        Some(ref device) => device as &str,
         _ => try!(get_default_device().ok_or(()))
     };
 
