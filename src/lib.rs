@@ -77,7 +77,6 @@ impl State {
 
     pub fn add_value_id(&mut self, value_id: ValueID) {
         self.value_ids.insert(value_id.clone());
-        println!("Added value_id: {:?}", value_id);
     }
 
     pub fn remove_value_id(&mut self, value_id: ValueID) {
@@ -136,20 +135,20 @@ impl manager::NotificationWatcher for ZWaveWatcher {
                 let controller = notification.get_controller();
                 let mut state = self.get_state();
                 if !state.controllers.contains(&controller) {
-                    println!("Found new controller: {:?}", controller);
+                    println!("Found new controller: {}", controller);
                     state.controllers.insert(controller);
                 }
             },
             NotificationType::Type_NodeAdded => {
                 let mut state = self.get_state();
                 let node = notification.get_node();
-                println!("NodeAdded: {:?}", node);
+                println!("NodeAdded: {}", node);
                 state.add_node(node);
             },
             NotificationType::Type_NodeRemoved => {
                 let mut state = self.get_state();
                 let node = notification.get_node();
-                println!("NodeRemoved: {:?}", node);
+                println!("NodeRemoved: {}", node);
                 state.remove_node(node);
             },
             NotificationType::Type_NodeEvent => {
@@ -158,20 +157,20 @@ impl manager::NotificationWatcher for ZWaveWatcher {
             NotificationType::Type_ValueAdded => {
                 let mut state = self.get_state();
                 let value_id = notification.get_value_id();
-                println!("ValueAdded: {:?}", value_id);
+                println!("ValueAdded: {}", value_id);
                 state.add_value_id(value_id);
             },
             NotificationType::Type_ValueChanged => {
                 let mut state = self.get_state();
                 let value_id = notification.get_value_id();
-                println!("ValueChanged: {:?}", value_id);
+                println!("ValueChanged: {}", value_id);
                 state.add_value_id(value_id);
                 // TODO: Tell somebody that the value changed
             },
             NotificationType::Type_ValueRemoved => {
                 let mut state = self.get_state();
                 let value_id = notification.get_value_id();
-                println!("ValueRemoved: {:?}", value_id);
+                println!("ValueRemoved: {}", value_id);
                 state.remove_value_id(value_id);
             },
             _ => {
