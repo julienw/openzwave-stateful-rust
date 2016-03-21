@@ -139,6 +139,10 @@ impl manager::NotificationWatcher for ZWaveWatcher {
                     state.controllers.insert(controller);
                 }
             },
+            NotificationType::Type_NodeNew => {
+                let node = notification.get_node();
+                println!("NodeNew: {}", node);
+            },
             NotificationType::Type_NodeAdded => {
                 let mut state = self.get_state();
                 let node = notification.get_node();
@@ -173,6 +177,11 @@ impl manager::NotificationWatcher for ZWaveWatcher {
                 println!("ValueRemoved: {}", value_id);
                 state.remove_value_id(value_id);
             },
+            NotificationType::Type_Notification => {
+                println!("Notification Code: {} {}",
+                         notification.get_notification().map_or(String::from("???"), |nc| nc.to_string()),
+                         notification.get_node().simple_debug());
+            }
             _ => {
                 //println!("Unknown notification: {:?}", notification);
             }
