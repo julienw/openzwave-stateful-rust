@@ -127,7 +127,7 @@ impl ZWaveWatcher {
 }
 
 impl manager::NotificationWatcher for ZWaveWatcher {
-    fn on_notification(&self, notification: Notification) {
+    fn on_notification(&self, notification: &Notification) {
         //println!("Received notification: {:?}", notification);
 
         match notification.get_type() {
