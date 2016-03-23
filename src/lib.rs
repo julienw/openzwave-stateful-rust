@@ -99,6 +99,14 @@ impl ZWaveManager {
         }
     }
 
+    pub fn add_node(&self, home_id: u32, secure: bool) -> Result<(), ()> {
+        self.ozw_manager.add_node(home_id, secure).and(Ok(()))
+    }
+
+    pub fn remove_node(&self, home_id: u32) -> Result<(), ()> {
+        self.ozw_manager.remove_node(home_id).and(Ok(()))
+    }
+
     fn add_watcher(&mut self) -> Result<(), ()> {
         self.ozw_manager.add_watcher(self.watcher.clone()).and(Ok(()))
     }
