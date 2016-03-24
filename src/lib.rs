@@ -1,12 +1,13 @@
 extern crate openzwave;
-use openzwave::{options, manager, controller};
+use openzwave::{ options, manager };
 use openzwave::notification::*;
-use openzwave::node::*;
 pub use openzwave::value_classes::value_id::{ ValueID, ValueGenre };
-use std::fs;
-use std::sync::{ Arc, Mutex };
+pub use openzwave::controller::Controller;
+pub use openzwave::node::Node;
+use std::{ fmt, fs };
 use std::collections::{ BTreeSet, HashMap, HashSet };
-use std::sync::MutexGuard;
+use std::sync::{ Arc, Mutex, MutexGuard };
+use std::sync::mpsc;
 
 #[cfg(windows)]
 fn get_default_device() {
@@ -30,9 +31,9 @@ fn get_default_device() -> Option<&'static str> {
 
 #[derive(Debug, Clone)]
 pub struct State {
-    controllers: HashSet<controller::Controller>,
+    controllers: HashSet<Controller>,
     nodes: BTreeSet<Node>,
-    nodes_map: HashMap<controller::Controller, BTreeSet<Node>>,
+    nodes_map: HashMap<Controller, BTreeSet<Node>>,
     value_ids: BTreeSet<ValueID>,
 }
 
@@ -46,7 +47,7 @@ impl State {
         }
     }
 
-    pub fn get_controllers(&self) -> &HashSet<controller::Controller> {
+    pub fn get_controllers(&self) -> &HashSet<Controller> {
         &self.controllers
     }
 
@@ -54,7 +55,7 @@ impl State {
         &self.nodes
     }
 
-    pub fn get_nodes_map(&self) -> &HashMap<controller::Controller, BTreeSet<Node>> {
+    pub fn get_nodes_map(&self) -> &HashMap<Controller, BTreeSet<Node>> {
         &self.nodes_map
     }
 
@@ -90,13 +91,18 @@ pub struct ZWaveManager {
 }
 
 impl ZWaveManager {
-    fn new(manager: manager::Manager) -> ZWaveManager {
-        ZWaveManager {
+    fn new(manager: manager::Manager) -> (Self, mpsc::Receiver<ZWaveNotification>) {
+        let (tx, rx) = mpsc::channel();
+
+        let manager = ZWaveManager {
             watcher: ZWaveWatcher {
                 state: Arc::new(Mutex::new(State::new())),
+                sender: Arc::new(Mutex::new(tx))
             },
             ozw_manager: manager
-        }
+        };
+
+        (manager, rx)
     }
 
     pub fn add_node(&self, home_id: u32, secure: bool) -> Result<(), ()> {
@@ -123,14 +129,57 @@ impl ZWaveManager {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum ZWaveNotification {
+    ControllerReady(Controller),
+    NodeNew(Node),
+    NodeAdded(Node),
+    NodeRemoved(Node),
+    ValueAdded(ValueID),
+    ValueChanged(ValueID),
+    ValueRemoved(ValueID),
+    Generic(String),
+}
+
+impl fmt::Display for ZWaveNotification {
+    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+        let str;
+        match *self {
+            ZWaveNotification::ControllerReady(controller) => str = format!("ControllerReady: {}", controller),
+            ZWaveNotification::NodeNew(node)               => str = format!("NodeNew: {}", node),
+            ZWaveNotification::NodeAdded(node)             => str = format!("NodeAdded: {}", node),
+            ZWaveNotification::NodeRemoved(node)           => str = format!("NodeRemoved: {}", node),
+            ZWaveNotification::ValueAdded(value)           => str = format!("ValueAdded: {}", value),
+            ZWaveNotification::ValueChanged(value)         => str = format!("ValueChanged: {}", value),
+            ZWaveNotification::ValueRemoved(value)         => str = format!("ValueRemoved: {}", value),
+            ZWaveNotification::Generic(ref info)           => str = format!("Generic: {}", info),
+        }
+
+        write!(f, "{}", str)
+    }
+}
+
+// We'll get notifications coming from several threads that we don't control, so we'll have one
+// instance of mpsc::Sender for each thread because we don't control when to clone it. That's why
+// we use a Arc<Mutex<Sender>>. In the future we could implement Clone manually to clone the
+// Sender and wrap it in a new Mutex instead, but this would only be really useful if we have
+// several busy controllers. Another optimization if we have a lot of notifications coming is to
+// lazily clone the Sender the first time we receive a Notification on a thread -- but I don't see
+// how to see this without involving thread_local-bound structures. So keeping things simple for
+// now until we see there is a bottleneck here.
 #[derive(Clone)]
 struct ZWaveWatcher {
-    state: Arc<Mutex<State>>
+    state: Arc<Mutex<State>>,
+    sender: Arc<Mutex<mpsc::Sender<ZWaveNotification>>>
 }
 
 impl ZWaveWatcher {
     pub fn get_state(&self) -> MutexGuard<State> {
         self.state.lock().unwrap()
+    }
+
+    fn get_channel_sender(&self) -> MutexGuard<mpsc::Sender<ZWaveNotification>> {
+        self.sender.lock().unwrap()
     }
 }
 
@@ -141,58 +190,95 @@ impl manager::NotificationWatcher for ZWaveWatcher {
         match notification.get_type() {
             NotificationType::Type_DriverReady => {
                 let controller = notification.get_controller();
-                let mut state = self.get_state();
-                if !state.controllers.contains(&controller) {
-                    println!("Found new controller: {}", controller);
-                    state.controllers.insert(controller);
+                {
+                    let mut state = self.get_state();
+                    if !state.controllers.contains(&controller) {
+                        state.controllers.insert(controller);
+                    }
                 }
+
+                self.get_channel_sender().send(ZWaveNotification::ControllerReady(controller)).unwrap();
             },
+
             NotificationType::Type_NodeNew => {
                 let node = notification.get_node();
-                println!("NodeNew: {}", node);
+                self.get_channel_sender().send(ZWaveNotification::NodeNew(node)).unwrap();
             },
+
             NotificationType::Type_NodeAdded => {
-                let mut state = self.get_state();
                 let node = notification.get_node();
-                println!("NodeAdded: {}", node);
-                state.add_node(node);
+
+                {
+                    let mut state = self.get_state();
+                    state.add_node(node);
+                }
+
+                self.get_channel_sender().send(ZWaveNotification::NodeAdded(node)).unwrap();
             },
+
             NotificationType::Type_NodeRemoved => {
-                let mut state = self.get_state();
                 let node = notification.get_node();
-                println!("NodeRemoved: {}", node);
-                state.remove_node(node);
+
+                {
+                    let mut state = self.get_state();
+                    state.remove_node(node);
+                }
+
+                self.get_channel_sender().send(ZWaveNotification::NodeRemoved(node)).unwrap();
             },
+
             NotificationType::Type_NodeEvent => {
-                println!("NodeEvent");
+                self.get_channel_sender().send(ZWaveNotification::Generic(String::from("NodeEvent"))).unwrap();
             },
+
             NotificationType::Type_ValueAdded => {
-                let mut state = self.get_state();
                 let value_id = notification.get_value_id();
-                println!("ValueAdded: {}", value_id);
-                state.add_value_id(value_id);
+
+                {
+                    let mut state = self.get_state();
+                    state.add_value_id(value_id);
+                }
+
+                self.get_channel_sender().send(ZWaveNotification::ValueAdded(value_id)).unwrap();
             },
+
             NotificationType::Type_ValueChanged => {
-                let mut state = self.get_state();
                 let value_id = notification.get_value_id();
-                println!("ValueChanged: {}", value_id);
-                state.add_value_id(value_id);
-                // TODO: Tell somebody that the value changed
+
+                {
+                    let mut state = self.get_state();
+                    state.add_value_id(value_id);
+                }
+
+                self.get_channel_sender().send(ZWaveNotification::ValueChanged(value_id)).unwrap();
             },
+
             NotificationType::Type_ValueRemoved => {
-                let mut state = self.get_state();
                 let value_id = notification.get_value_id();
-                println!("ValueRemoved: {}", value_id);
-                state.remove_value_id(value_id);
+
+                {
+                    let mut state = self.get_state();
+                    state.remove_value_id(value_id);
+                }
+
+                self.get_channel_sender().send(ZWaveNotification::ValueRemoved(value_id)).unwrap();
             },
+
             NotificationType::Type_Notification => {
-                println!("Notification Code: {} {}",
-                         notification.get_notification().map_or(String::from("???"), |nc| nc.to_string()),
-                         notification.get_node().simple_debug());
+                let info = format!(
+                    "Notification Code: {} {}",
+                    notification.get_notification().map_or(String::from("???"), |nc| nc.to_string()),
+                    notification.get_node().simple_debug()
+                );
+
+                self.get_channel_sender().send(ZWaveNotification::Generic(info)).unwrap();
             }
+
             _ => {
-                //println!("Unknown notification: {:?}", notification);
+                let info = format!("Unknown notification: {:?}", notification);
+                self.get_channel_sender().send(ZWaveNotification::Generic(info)).unwrap();
             }
+
         }
     }
 }
@@ -201,7 +287,7 @@ pub struct InitOptions {
     pub device: Option<String>
 }
 
-pub fn init(options: &InitOptions) -> Result<ZWaveManager,()> {
+pub fn init(options: &InitOptions) -> Result<(ZWaveManager, mpsc::Receiver<ZWaveNotification>),()> {
     let mut ozw_options = try!(options::Options::create("./config/", "", "--SaveConfiguration true --DumpTriggerLevel 0 --ConsoleOutput false"));
 
     // TODO: The NetworkKey should really be derived from something unique
@@ -210,7 +296,7 @@ pub fn init(options: &InitOptions) -> Result<ZWaveManager,()> {
     try!(options::Options::add_option_string(&mut ozw_options, "NetworkKey", "0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10", false));
 
     let manager = try!(manager::Manager::create(ozw_options));
-    let mut zwave_manager = ZWaveManager::new(manager);
+    let (mut zwave_manager, rx) = ZWaveManager::new(manager);
     try!(zwave_manager.add_watcher());
 
     let device = match options.device {
@@ -222,7 +308,7 @@ pub fn init(options: &InitOptions) -> Result<ZWaveManager,()> {
 
     try!(zwave_manager.add_driver(&device));
 
-    Ok(zwave_manager)
+    Ok((zwave_manager, rx))
 }
 
 #[cfg(test)]
