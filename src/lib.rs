@@ -1,7 +1,7 @@
 extern crate openzwave;
 use openzwave::{ options, manager };
 use openzwave::notification::*;
-pub use openzwave::value_classes::value_id::{ ValueID, ValueGenre };
+pub use openzwave::value_classes::value_id::{ CommandClass, ValueID, ValueGenre, ValueType };
 pub use openzwave::controller::Controller;
 pub use openzwave::node::Node;
 use std::{ fmt, fs };
