@@ -284,11 +284,13 @@ impl manager::NotificationWatcher for ZWaveWatcher {
 }
 
 pub struct InitOptions {
-    pub device: Option<String>
+    pub device: Option<String>,
+    pub config_path: String,
+    pub user_path: String
 }
 
 pub fn init(options: &InitOptions) -> Result<(ZWaveManager, mpsc::Receiver<ZWaveNotification>),()> {
-    let mut ozw_options = try!(options::Options::create("./config/", "", "--SaveConfiguration true --DumpTriggerLevel 0 --ConsoleOutput false"));
+    let mut ozw_options = try!(options::Options::create(&options.config_path, &options.user_path, "--SaveConfiguration true --DumpTriggerLevel 0 --ConsoleOutput false"));
 
     // TODO: The NetworkKey should really be derived from something unique
     //       about the foxbox that we're running on. This particular set of
