@@ -1,4 +1,7 @@
 extern crate openzwave;
+mod error;
+
+pub use error::{ Error, Result };
 use openzwave::{ options, manager };
 use openzwave::notification::*;
 pub use openzwave::value_classes::value_id::{ CommandClass, ValueID, ValueGenre, ValueType };
@@ -10,12 +13,12 @@ use std::sync::{ Arc, Mutex, MutexGuard };
 use std::sync::mpsc;
 
 #[cfg(windows)]
-fn get_default_device() {
+fn get_default_device() -> Result<&'static str> {
     "\\\\.\\COM6"
 }
 
 #[cfg(unix)]
-fn get_default_device() -> Option<&'static str> {
+fn get_default_device() -> Result<&'static str> {
     let default_devices = [
         "/dev/cu.usbserial", // MacOS X
         "/dev/cu.SLAB_USBtoUART", // MacOS X
@@ -27,6 +30,7 @@ fn get_default_device() -> Option<&'static str> {
         .iter()
         .find(|device_name| fs::metadata(device_name).is_ok())
         .map(|&str| str)
+        .ok_or(Error::NoDeviceFound)
 }
 
 #[derive(Debug, Clone)]
@@ -105,23 +109,27 @@ impl ZWaveManager {
         (manager, rx)
     }
 
-    pub fn add_node(&self, home_id: u32, secure: bool) -> Result<(), ()> {
-        self.ozw_manager.add_node(home_id, secure).and(Ok(()))
+    pub fn add_node(&self, home_id: u32, secure: bool) -> Result<()> {
+        try!(self.ozw_manager.add_node(home_id, secure));
+        Ok(())
     }
 
-    pub fn remove_node(&self, home_id: u32) -> Result<(), ()> {
-        self.ozw_manager.remove_node(home_id).and(Ok(()))
+    pub fn remove_node(&self, home_id: u32) -> Result<()> {
+        try!(self.ozw_manager.remove_node(home_id));
+        Ok(())
     }
 
-    fn add_watcher(&mut self) -> Result<(), ()> {
-        self.ozw_manager.add_watcher(self.watcher.clone()).and(Ok(()))
+    fn add_watcher(&mut self) -> Result<()> {
+        try!(self.ozw_manager.add_watcher(self.watcher.clone()));
+        Ok(())
     }
 
-    fn add_driver(&mut self, device: &str) -> Result<(), ()> {
-        match device {
+    fn add_driver(&mut self, device: &str) -> Result<()> {
+        try!(match device {
             "usb" => self.ozw_manager.add_usb_driver(),
             _ => self.ozw_manager.add_driver(&device)
-        }
+        });
+        Ok(())
     }
 
     pub fn get_state(&self) -> MutexGuard<State> {
@@ -142,7 +150,7 @@ pub enum ZWaveNotification {
 }
 
 impl fmt::Display for ZWaveNotification {
-    fn fmt(&self, f: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         let str;
         match *self {
             ZWaveNotification::ControllerReady(controller) => str = format!("ControllerReady: {}", controller),
@@ -289,7 +297,7 @@ pub struct InitOptions {
     pub user_path: String
 }
 
-pub fn init(options: &InitOptions) -> Result<(ZWaveManager, mpsc::Receiver<ZWaveNotification>),()> {
+pub fn init(options: &InitOptions) -> Result<(ZWaveManager, mpsc::Receiver<ZWaveNotification>)> {
     let mut ozw_options = try!(options::Options::create(&options.config_path, &options.user_path, "--SaveConfiguration true --DumpTriggerLevel 0 --ConsoleOutput false"));
 
     // TODO: The NetworkKey should really be derived from something unique
@@ -303,7 +311,7 @@ pub fn init(options: &InitOptions) -> Result<(ZWaveManager, mpsc::Receiver<ZWave
 
     let device = match options.device {
         Some(ref device) => device as &str,
-        _ => try!(get_default_device().ok_or(()))
+        _ => try!(get_default_device())
     };
 
     //println!("found device {}", device);
