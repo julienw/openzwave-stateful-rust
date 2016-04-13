@@ -136,6 +136,10 @@ impl ZWaveManager {
         (manager, rx)
     }
 
+    pub fn write_config(&self, home_id: u32) {
+        self.ozw_manager.write_config(home_id);
+    }
+
     pub fn add_node(&self, home_id: u32, secure: bool) -> Result<()> {
         try!(self.ozw_manager.add_node(home_id, secure));
         Ok(())
