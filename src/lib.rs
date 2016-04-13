@@ -20,9 +20,11 @@ fn get_default_device() -> Result<&'static str> {
 #[cfg(unix)]
 fn get_default_device() -> Result<&'static str> {
     let default_devices = [
-        "/dev/cu.usbserial", // MacOS X
-        "/dev/cu.SLAB_USBtoUART", // MacOS X
-        "/dev/ttyUSB0", // Linux
+        "/dev/cu.usbserial", // MacOS X (presumably)
+        "/dev/cu.SLAB_USBtoUART", // MacOS X (Aeotech Z-Stick S2)
+        "/dev/cu.usbmodem14211", // Yoric (Aeotech Z-Stick Gen-5)
+        "/dev/cu.usbmodem1421", // Isabel (UZB Static Controller)
+        "/dev/ttyUSB0", // Linux (Aeotech Z-Stick S2)
         "/dev/ttyACM0"  // Linux (Aeotech Z-Stick Gen-5)
     ];
 
