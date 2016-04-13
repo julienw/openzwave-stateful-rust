@@ -162,6 +162,14 @@ impl ZWaveManager {
     pub fn get_state(&self) -> MutexGuard<State> {
         self.watcher.get_state()
     }
+
+    pub fn write_configs(&self) {
+        let state = self.get_state();
+        let controllers = state.get_controllers();
+        for (controller, _) in controllers {
+            controller.write_config();
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
