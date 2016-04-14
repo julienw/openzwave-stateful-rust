@@ -1,9 +1,11 @@
 use openzwave;
+use std::io;
 
 #[derive(Debug)]
 pub enum Error {
     OpenzwaveError(openzwave::Error),
-    NoDeviceFound
+    NoDeviceFound,
+    CannotReadDevice(String, io::Error),
 }
 
 pub type Result<T> = ::std::result::Result<T, Error>;
@@ -15,6 +17,7 @@ impl fmt::Display for Error {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
         match *self {
             Error::OpenzwaveError(ref cause) => write!(formatter, "{}", cause),
+            Error::CannotReadDevice(ref message, ref cause) => write!(formatter, "The device {} is not readable: {}", message, cause),
             _ => write!(formatter, "{}", error::Error::description(self))
         }
     }
@@ -24,6 +27,7 @@ impl error::Error for Error {
     fn description(&self) -> &str {
         match *self {
             Error::OpenzwaveError(ref cause) => cause.description(),
+            Error::CannotReadDevice(_, _) => "Couldn't read the device",
             Error::NoDeviceFound => "No suitable device was found"
         }
     }
@@ -31,6 +35,7 @@ impl error::Error for Error {
     fn cause(&self) -> Option<&error::Error> {
         match *self {
             Error::OpenzwaveError(ref cause) => Some(cause),
+            Error::CannotReadDevice(_, ref cause) => Some(cause),
             _ => None
         }
     }

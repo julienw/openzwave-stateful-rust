@@ -560,6 +560,10 @@ pub fn init(options: &InitOptions) -> Result<(ZWaveManager, mpsc::Receiver<ZWave
         _ => try!(get_default_device())
     };
 
+    try!(
+        fs::File::open(device).map_err(|err| Error::CannotReadDevice(device.to_string(), err))
+    );
+
     //println!("found device {}", device);
 
     try!(zwave_manager.add_driver(device));
