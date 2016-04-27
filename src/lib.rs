@@ -146,6 +146,22 @@ impl ZWaveManager {
         Ok(())
     }
 
+    pub fn test_network(&self, home_id: u32, count: u32) {
+        self.ozw_manager.test_network(home_id, count);
+    }
+
+    pub fn test_network_node(&self, home_id: u32, node_id: u8, count: u32) {
+        self.ozw_manager.test_network_node(home_id, node_id, count);
+    }
+
+    pub fn heal_network(&self, home_id: u32, do_rr: bool) {
+        self.ozw_manager.heal_network(home_id, do_rr);
+    }
+
+    pub fn heal_network_node(&self, home_id: u32, node_id: u8, do_rr: bool) {
+        self.ozw_manager.heal_network_node(home_id, node_id, do_rr);
+    }
+
     fn add_watcher(&mut self) -> Result<()> {
         try!(self.ozw_manager.add_watcher(self.watcher.clone()));
         Ok(())
