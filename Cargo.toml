@@ -4,5 +4,7 @@ version = "0.1.0"
 authors = ["Julien Wajsberg <felash@gmail.com>"]
 
 [dependencies]
+log = "0.3"
+serial_ports = { git = "https://github.com/dhylands/serial-ports-rs" }
 "openzwave" = { git = "https://github.com/fxbox/openzwave-rust" }
 
