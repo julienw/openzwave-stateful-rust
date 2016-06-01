@@ -1,7 +1,12 @@
+#[macro_use]
+extern crate log;
+extern crate serial_ports;
 extern crate openzwave;
 mod error;
 
 pub use error::{ Error, Result };
+use serial_ports::{ ListPortInfo, ListPorts };
+use serial_ports::ListPortType::UsbPort;
 use openzwave::{ options, manager };
 use openzwave::notification::*;
 pub use openzwave::value_classes::value_id::{ CommandClass, ValueID, ValueGenre, ValueType };
@@ -13,26 +18,70 @@ use std::sync::{ Arc, Mutex, MutexGuard };
 use std::sync::mpsc;
 
 #[cfg(windows)]
-fn get_default_device() -> Result<&'static str> {
-    "\\\\.\\COM6"
+fn get_default_devices() -> Vec<String> {
+    vec!["\\\\.\\COM6".to_owned()]
 }
 
 #[cfg(unix)]
-fn get_default_device() -> Result<&'static str> {
-    let default_devices = [
-        "/dev/cu.usbserial", // MacOS X (presumably)
-        "/dev/cu.SLAB_USBtoUART", // MacOS X (Aeotech Z-Stick S2)
-        "/dev/cu.usbmodem14211", // Yoric (Aeotech Z-Stick Gen-5)
-        "/dev/cu.usbmodem1421", // Isabel (UZB Static Controller)
-        "/dev/ttyUSB0", // Linux (Aeotech Z-Stick S2)
-        "/dev/ttyACM0"  // Linux (Aeotech Z-Stick Gen-5)
+fn is_usb_zwave_device(port: &ListPortInfo) -> bool {
+    let default_usb_devices = [
+        // VID     PID
+        //-----   -----
+        (0x0658, 0x0200),   // Aeotech Z-Stick Gen-5
+        (0x0658, 0x0280),   // UZB1
+        (0x10c4, 0xea60),   // Aeotech Z-Stick S2
     ];
 
-    default_devices
-        .iter()
-        .find(|device_name| fs::metadata(device_name).is_ok())
-        .map(|&str| str)
-        .ok_or(Error::NoDeviceFound)
+    // Is it one of the vid/pids in the table?
+    if let UsbPort(ref info) = port.port_type {
+        default_usb_devices.contains(&(info.vid, info.pid))
+    } else {
+        false
+    }
+}
+
+#[cfg(unix)]
+fn get_default_devices() -> Vec<String> {
+
+    // Enumerate all of the serial devices and see if any of them match our
+    // known VID:PID.
+
+    let mut ports:Vec<String> = Vec::new();
+    let usb_ports:Vec<String> = ListPorts::new()
+                                    .iter()
+                                    .filter(|port| is_usb_zwave_device(port))
+                                    .map(|port| port.device.to_string_lossy().into_owned())
+                                    .collect();
+    ports.extend(usb_ports);
+    if ports.is_empty() {
+        // The following is only included temporarily until we can get a more
+        // comprehensive list of VIDs and PIDs.
+
+        error!("[OpenzwaveStateful] Unable to locate ZWave USB dongle. The following VID:PIDs were found:");
+        for port in ListPorts::new().iter() {
+            if let UsbPort(ref info) = port.port_type {
+                error!("[OpenzwaveStateful]   {:04x}:{:04x} {}", info.vid, info.pid, port.device.display());
+            }
+        }
+
+        // The following should be removed, once we have all of the devices captured using the above
+
+        let default_devices = [
+            "/dev/cu.usbserial", // MacOS X (presumably)
+            "/dev/cu.SLAB_USBtoUART", // MacOS X (Aeotech Z-Stick S2)
+            "/dev/cu.usbmodem14211", // Yoric (Aeotech Z-Stick Gen-5)
+            "/dev/cu.usbmodem1421", // Isabel (UZB Static Controller)
+            "/dev/ttyUSB0", // Linux (Aeotech Z-Stick S2)
+            "/dev/ttyACM0"  // Linux (Aeotech Z-Stick Gen-5)
+        ];
+
+        if let Some(default_device) = default_devices.iter()
+                                                     .find(|device_name| fs::metadata(device_name).is_ok())
+                                                     .map(|&str| str.to_owned()) {
+            ports.push(default_device);
+        }
+    }
+    ports
 }
 
 #[derive(Debug, Clone)]
@@ -549,7 +598,7 @@ pub enum ConfigPath<'a> {
 }
 
 pub struct InitOptions<'a, 'b> {
-    pub device: Option<String>,
+    pub devices: Option<Vec<String>>,
     pub config_path: ConfigPath<'a>,
     pub user_path: &'b str
 }
@@ -571,18 +620,15 @@ pub fn init(options: &InitOptions) -> Result<(ZWaveManager, mpsc::Receiver<ZWave
     let (mut zwave_manager, rx) = ZWaveManager::new(manager);
     try!(zwave_manager.add_watcher());
 
-    let device = match options.device {
-        Some(ref device) => device as &str,
-        _ => try!(get_default_device())
-    };
+    let devices = options.devices.clone().unwrap_or(get_default_devices());
+    for device in devices.iter() {
+        try !(
+            fs::File::open(&device).map_err(|err| Error::CannotReadDevice(device.clone(), err))
+        );
+        //println!("found device {}", device);
 
-    try!(
-        fs::File::open(device).map_err(|err| Error::CannotReadDevice(device.to_string(), err))
-    );
-
-    //println!("found device {}", device);
-
-    try!(zwave_manager.add_driver(device));
+        try!(zwave_manager.add_driver(&device));
+    }
 
     Ok((zwave_manager, rx))
 }
