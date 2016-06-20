@@ -2,20 +2,25 @@
 extern crate log;
 extern crate serial_ports;
 extern crate openzwave;
+extern crate notify;
+
 mod error;
 
 pub use error::{ Error, Result };
 use serial_ports::{ ListPortInfo, ListPorts };
 use serial_ports::ListPortType::UsbPort;
+use notify::{ op as notify_op, Event as NotifyEvent, Watcher };
+
 use openzwave::{ options, manager };
 use openzwave::notification::*;
 pub use openzwave::value_classes::value_id::{ CommandClass, ValueID, ValueGenre, ValueType };
 pub use openzwave::controller::Controller;
 pub use openzwave::node::Node;
-use std::{ fmt, fs };
+use std::{ fmt, fs, thread };
 use std::collections::{ BTreeSet, HashMap };
-use std::sync::{ Arc, Mutex, MutexGuard };
+use std::sync::{ Arc, Mutex, MutexGuard, RwLock };
 use std::sync::mpsc;
+use std::path::Path;
 
 #[cfg(windows)]
 fn get_default_devices() -> Vec<String> {
@@ -167,7 +172,7 @@ impl State {
 
 pub struct ZWaveManager {
     watcher: ZWaveWatcher,
-    ozw_manager: manager::Manager
+    ozw_manager: RwLock<manager::Manager>
 }
 
 impl ZWaveManager {
@@ -179,47 +184,57 @@ impl ZWaveManager {
                 state: Arc::new(Mutex::new(State::new())),
                 sender: Arc::new(Mutex::new(tx))
             },
-            ozw_manager: manager
+            ozw_manager: RwLock::new(manager)
         };
 
         (manager, rx)
     }
 
     pub fn add_node(&self, home_id: u32, secure: bool) -> Result<()> {
-        try!(self.ozw_manager.add_node(home_id, secure));
+        try!(self.ozw_manager.read().unwrap().add_node(home_id, secure));
         Ok(())
     }
 
     pub fn remove_node(&self, home_id: u32) -> Result<()> {
-        try!(self.ozw_manager.remove_node(home_id));
+        try!(self.ozw_manager.read().unwrap().remove_node(home_id));
         Ok(())
     }
 
     pub fn test_network(&self, home_id: u32, count: u32) {
-        self.ozw_manager.test_network(home_id, count);
+        self.ozw_manager.read().unwrap().test_network(home_id, count);
     }
 
     pub fn test_network_node(&self, home_id: u32, node_id: u8, count: u32) {
-        self.ozw_manager.test_network_node(home_id, node_id, count);
+        self.ozw_manager.read().unwrap().test_network_node(home_id, node_id, count);
     }
 
     pub fn heal_network(&self, home_id: u32, do_rr: bool) {
-        self.ozw_manager.heal_network(home_id, do_rr);
+        self.ozw_manager.read().unwrap().heal_network(home_id, do_rr);
     }
 
     pub fn heal_network_node(&self, home_id: u32, node_id: u8, do_rr: bool) {
-        self.ozw_manager.heal_network_node(home_id, node_id, do_rr);
+        self.ozw_manager.read().unwrap().heal_network_node(home_id, node_id, do_rr);
     }
 
     fn add_watcher(&mut self) -> Result<()> {
-        try!(self.ozw_manager.add_watcher(self.watcher.clone()));
+        try!(self.ozw_manager.write().unwrap().add_watcher(self.watcher.clone()));
         Ok(())
     }
 
-    fn add_driver(&mut self, device: &str) -> Result<()> {
+    fn add_driver(&self, device: &str) -> Result<()> {
+        let mut manager = self.ozw_manager.write().unwrap();
         try!(match device {
-            "usb" => self.ozw_manager.add_usb_driver(),
-            _ => self.ozw_manager.add_driver(&device)
+            "usb" => manager.add_usb_driver(),
+            _ => manager.add_driver(&device)
+        });
+        Ok(())
+    }
+
+    fn remove_driver(&self, device: &str) -> Result<()> {
+        let mut manager = self.ozw_manager.write().unwrap();
+        try!(match device {
+            "usb" => manager.remove_usb_driver(),
+            _ => manager.remove_driver(&device)
         });
         Ok(())
     }
@@ -603,7 +618,48 @@ pub struct InitOptions<'a, 'b> {
     pub user_path: &'b str
 }
 
-pub fn init(options: &InitOptions) -> Result<(ZWaveManager, mpsc::Receiver<ZWaveNotification>)> {
+struct FsWatcher {
+    watcher: notify::RecommendedWatcher,
+    rx: mpsc::Receiver<notify::Event>,
+}
+
+impl FsWatcher {
+    pub fn new() -> notify::Result<FsWatcher> {
+        let (tx, rx) = mpsc::channel();
+        let fs_watcher = try!(notify::new(tx));
+        Ok(FsWatcher {
+            watcher: fs_watcher,
+            rx: rx
+        })
+    }
+
+    pub fn watch<P: AsRef<Path>>(&mut self, path: P) -> notify::Result<()> {
+        self.watcher.watch(path)
+    }
+
+    pub fn spawn(mut self, zwave_manager: &Arc<ZWaveManager>) {
+        let zwave_manager = zwave_manager.clone();
+
+        thread::spawn(move || {
+            for event in self.rx {
+                debug!("[OpenzwaveStateful] Received fsnotify event: {:?}", event);
+                if let NotifyEvent { path: Some(path), op: Ok(op) } = event {
+                    if !op.intersects(notify_op::CHMOD | notify_op::REMOVE) {
+                        continue
+                    }
+
+                    if let Some(path_str) = path.to_str() {
+                        info!("[OpenzwaveStateful] Removing driver for path {:?}", path_str);
+                        zwave_manager.remove_driver(path_str).ok(); // if this fails, let's not panic this thread
+                        self.watcher.unwatch(&path).ok();
+                    }
+                }
+            }
+        });
+    }
+}
+
+pub fn init(options: &InitOptions) -> Result<(Arc<ZWaveManager>, mpsc::Receiver<ZWaveNotification>)> {
     let config_path = match options.config_path {
         ConfigPath::Default => "",
         ConfigPath::Custom(value) => value
@@ -620,17 +676,26 @@ pub fn init(options: &InitOptions) -> Result<(ZWaveManager, mpsc::Receiver<ZWave
     let (mut zwave_manager, rx) = ZWaveManager::new(manager);
     try!(zwave_manager.add_watcher());
 
+    let mut fs_watcher = try!(FsWatcher::new());
+
     let devices = options.devices.clone().unwrap_or(get_default_devices());
-    for device in devices.iter() {
+
+    for device in devices {
         try !(
             fs::File::open(&device).map_err(|err| Error::CannotReadDevice(device.clone(), err))
         );
-        //println!("found device {}", device);
 
+        debug!("[OpenzwaveStateful] found device {}", device);
+
+        if fs_watcher.watch(&device).is_err() {
+            error!("[OpenzwaveStateful] Couldn't set a watcher for device '{}'. We'll still try to add a zwave driver.", device);
+        }
         try!(zwave_manager.add_driver(&device));
     }
 
-    Ok((zwave_manager, rx))
+    let zwave_manager = Arc::new(zwave_manager);
+    fs_watcher.spawn(&zwave_manager);
+    Ok((zwave_manager.clone(), rx))
 }
 
 #[cfg(test)]
