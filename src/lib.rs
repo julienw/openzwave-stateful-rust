@@ -619,29 +619,37 @@ pub struct InitOptions<'a, 'b> {
 }
 
 struct FsWatcher {
-    watcher: notify::RecommendedWatcher,
-    rx: mpsc::Receiver<notify::Event>,
+    path_tx: mpsc::Sender<Box<AsRef<Path>>>,
+    fs_rx: mpsc::Receiver<notify::Event>,
 }
 
 impl FsWatcher {
     pub fn new() -> notify::Result<FsWatcher> {
-        let (tx, rx) = mpsc::channel();
-        let fs_watcher = try!(notify::new(tx));
+        let (fs_tx, fs_rx) = mpsc::channel();
+        let (path_tx, path_rx) = mpsc::channel();
+
+        thread::spawn(move || {
+            let fs_watcher = try!(notify::new(fs_tx));
+            for path in path_rx {
+                fs_watcher.watch(path).ok();
+            }
+        });
+
         Ok(FsWatcher {
-            watcher: fs_watcher,
-            rx: rx
+            path_tx: path_tx,
+            fs_rx: fs_rx,
         })
     }
 
-    pub fn watch<P: AsRef<Path>>(&mut self, path: P) -> notify::Result<()> {
-        self.watcher.watch(path)
+    pub fn watch<P: AsRef<Path>>(&mut self, path: P) {
+        self.path_tx.send(path.as_ref()).ok();
     }
 
-    pub fn spawn(mut self, zwave_manager: &Arc<ZWaveManager>) {
+    pub fn start_listening(mut self, zwave_manager: &Arc<ZWaveManager>) {
         let zwave_manager = zwave_manager.clone();
 
         thread::spawn(move || {
-            for event in self.rx {
+            for event in self.fs_rx {
                 debug!("[OpenzwaveStateful] Received fsnotify event: {:?}", event);
                 if let NotifyEvent { path: Some(path), op: Ok(op) } = event {
                     if !op.intersects(notify_op::CHMOD | notify_op::REMOVE) {
@@ -694,7 +702,7 @@ pub fn init(options: &InitOptions) -> Result<(Arc<ZWaveManager>, mpsc::Receiver<
     }
 
     let zwave_manager = Arc::new(zwave_manager);
-    fs_watcher.spawn(&zwave_manager);
+    fs_watcher.start_listening(&zwave_manager);
     Ok((zwave_manager.clone(), rx))
 }
 
